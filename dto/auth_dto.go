@@ -10,3 +10,15 @@ type RegisterRequest struct {
 	Password string `json:"password" validate:"required,min=6"`
 	Name     string `json:"name" validate:"required"`
 }
+
+type GoogleLoginRequest struct {
+	Token string `json:"id_token" validate:"required"`
+}
+
+type RefreshTokenRequest struct {
+	Token string `json:"refresh_token" validate:"required"`
+}
+
+type LogoutRequest struct {
+	Token string `json:"refresh_token" validate:"required"`
+}
