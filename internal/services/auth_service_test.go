@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"auth/domain"
 	"auth/dto"
@@ -50,6 +51,8 @@ type mockUserRepository struct {
 	createRefreshTokenFunc       func(ctx context.Context, token domain.UserRefreshToken) error
 	findByIDFunc                 func(ctx context.Context, id int) (domain.User, error)
 	findOrCreateWithOAuthFunc    func(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error)
+	revokeRefreshTokenFunc       func(ctx context.Context, token string) error
+	findRefreshTokenFunc         func(ctx context.Context, token string) (domain.UserRefreshToken, error)
 }
 
 func (m *mockUserRepository) FindByEmailWithLocalAuth(ctx context.Context, email string) (domain.UserEmailAuth, error) {
@@ -73,6 +76,20 @@ func (m *mockUserRepository) FindByID(ctx context.Context, id int) (domain.User,
 
 func (m *mockUserRepository) FindOrCreateWithOAuth(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error) {
 	return m.findOrCreateWithOAuthFunc(ctx, user)
+}
+
+func (m *mockUserRepository) RevokeRefreshToken(ctx context.Context, token string) error {
+	if m.revokeRefreshTokenFunc != nil {
+		return m.revokeRefreshTokenFunc(ctx, token)
+	}
+	return nil
+}
+
+func (m *mockUserRepository) FindRefreshToken(ctx context.Context, token string) (domain.UserRefreshToken, error) {
+	if m.findRefreshTokenFunc != nil {
+		return m.findRefreshTokenFunc(ctx, token)
+	}
+	return domain.UserRefreshToken{}, nil
 }
 
 // --- Mock JWTService ---
@@ -444,6 +461,187 @@ func TestAuthService_GoogleLogin(t *testing.T) {
 		_, _, err := service.GoogleLogin(context.Background(), "mocked.google.token")
 		if err == nil || err.Error() != "failed to save refresh token" {
 			t.Errorf("Expected 'failed to save refresh token' error, got %v", err)
+		}
+	})
+}
+
+func TestAuthService_RefreshToken(t *testing.T) {
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			findRefreshTokenFunc: func(ctx context.Context, token string) (domain.UserRefreshToken, error) {
+				return domain.UserRefreshToken{
+					UserID:    1,
+					Token:     "valid-refresh-token",
+					IsRevoked: false,
+					ExpiresAt: time.Now().Add(1 * time.Hour),
+				}, nil
+			},
+			findByIDFunc: func(ctx context.Context, id int) (domain.User, error) {
+				return getMockedData().user, nil
+			},
+		}
+		mockJWT := &mockJWTService{
+			signTokenFunc: func(user domain.User) (string, error) {
+				return "new.jwt.token", nil
+			},
+		}
+		service := services.NewAuthService(mockRepo, mockJWT)
+
+		token, err := service.RefreshToken(context.Background(), "tokenid.valid-refresh-token")
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if token != "new.jwt.token" {
+			t.Errorf("Expected token 'new.jwt.token', got %v", token)
+		}
+	})
+
+	t.Run("Invalid Format", func(t *testing.T) {
+		service := services.NewAuthService(&mockUserRepository{}, &mockJWTService{})
+
+		_, err := service.RefreshToken(context.Background(), "invalid_format_token")
+		if err == nil || err.Error() != "invalid refresh token format" {
+			t.Errorf("Expected 'invalid refresh token format' error, got %v", err)
+		}
+	})
+
+	t.Run("Invalid Token - DB Error", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			findRefreshTokenFunc: func(ctx context.Context, token string) (domain.UserRefreshToken, error) {
+				return domain.UserRefreshToken{}, errors.New("db query error")
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		_, err := service.RefreshToken(context.Background(), "invalid.token")
+		if err == nil || err.Error() != "invalid refresh token" {
+			t.Errorf("Expected 'invalid refresh token' error, got %v", err)
+		}
+	})
+
+	t.Run("Invalid Token - Revoked", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			findRefreshTokenFunc: func(ctx context.Context, token string) (domain.UserRefreshToken, error) {
+				return domain.UserRefreshToken{
+					UserID:    1,
+					Token:     "revoked-refresh-token",
+					IsRevoked: true,
+					ExpiresAt: time.Now().Add(1 * time.Hour),
+				}, nil
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		_, err := service.RefreshToken(context.Background(), "revoked.refresh-token")
+		if err == nil || err.Error() != "invalid refresh token" {
+			t.Errorf("Expected 'invalid refresh token' error, got %v", err)
+		}
+	})
+
+	t.Run("Invalid Token - Expired", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			findRefreshTokenFunc: func(ctx context.Context, token string) (domain.UserRefreshToken, error) {
+				return domain.UserRefreshToken{
+					UserID:    1,
+					Token:     "expired-refresh-token",
+					IsRevoked: false,
+					ExpiresAt: time.Now().Add(-1 * time.Hour),
+				}, nil
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		_, err := service.RefreshToken(context.Background(), "expired.refresh-token")
+		if err == nil || err.Error() != "invalid refresh token" {
+			t.Errorf("Expected 'invalid refresh token' error, got %v", err)
+		}
+	})
+
+	t.Run("User Not Found", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			findRefreshTokenFunc: func(ctx context.Context, token string) (domain.UserRefreshToken, error) {
+				return domain.UserRefreshToken{
+					UserID:    99,
+					Token:     "valid-refresh-token",
+					IsRevoked: false,
+					ExpiresAt: time.Now().Add(1 * time.Hour),
+				}, nil
+			},
+			findByIDFunc: func(ctx context.Context, id int) (domain.User, error) {
+				return domain.User{}, errors.New("user not found")
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		_, err := service.RefreshToken(context.Background(), "tokenid.valid-refresh-token")
+		if err == nil || err.Error() != "user not found" {
+			t.Errorf("Expected 'user not found' error, got %v", err)
+		}
+	})
+
+	t.Run("Sign Token Failed", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			findRefreshTokenFunc: func(ctx context.Context, token string) (domain.UserRefreshToken, error) {
+				return domain.UserRefreshToken{
+					UserID:    1,
+					Token:     "valid-refresh-token",
+					IsRevoked: false,
+					ExpiresAt: time.Now().Add(1 * time.Hour),
+				}, nil
+			},
+			findByIDFunc: func(ctx context.Context, id int) (domain.User, error) {
+				return getMockedData().user, nil
+			},
+		}
+		mockJWT := &mockJWTService{
+			signTokenFunc: func(user domain.User) (string, error) {
+				return "", errors.New("jwt signing error")
+			},
+		}
+		service := services.NewAuthService(mockRepo, mockJWT)
+
+		_, err := service.RefreshToken(context.Background(), "tokenid.valid-refresh-token")
+		if err == nil || err.Error() != "failed to generate access token" {
+			t.Errorf("Expected 'failed to generate access token' error, got %v", err)
+		}
+	})
+}
+
+func TestAuthService_Logout(t *testing.T) {
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			revokeRefreshTokenFunc: func(ctx context.Context, token string) error {
+				return nil
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		err := service.Logout(context.Background(), "tokenid.valid-refresh-token")
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+	})
+
+	t.Run("Invalid Format", func(t *testing.T) {
+		service := services.NewAuthService(&mockUserRepository{}, &mockJWTService{})
+
+		err := service.Logout(context.Background(), "invalid_format_token")
+		if err == nil || err.Error() != "invalid refresh token format" {
+			t.Errorf("Expected 'invalid refresh token format' error, got %v", err)
+		}
+	})
+
+	t.Run("Failure", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			revokeRefreshTokenFunc: func(ctx context.Context, token string) error {
+				return errors.New("db error")
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		err := service.Logout(context.Background(), "tokenid.valid-refresh-token")
+		if err == nil || err.Error() != "failed to revoke refresh token" {
+			t.Errorf("Expected 'failed to revoke refresh token' error, got %v", err)
 		}
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/nrednav/cuid2"
@@ -174,6 +175,47 @@ func (s *authService) GoogleLogin(ctx context.Context, idToken string) (string, 
 	validRefreshToken := refreshTokenData.ID + "." + refreshToken
 
 	return accessToken, validRefreshToken, nil
+}
+
+func (s *authService) RefreshToken(ctx context.Context, rawRefreshToken string) (string, error) {
+	parts := strings.Split(rawRefreshToken, ".")
+	if len(parts) < 2 {
+		return "", errors.New("invalid refresh token format")
+	}
+
+	tokenID := parts[0]
+
+	storedToken, err := s.userRepo.FindRefreshToken(ctx, tokenID)
+	if err != nil || storedToken.IsRevoked || storedToken.ExpiresAt.Before(time.Now()) {
+		return "", errors.New("invalid refresh token")
+	}
+
+	user, err := s.userRepo.FindByID(ctx, storedToken.UserID)
+	if err != nil {
+		return "", errors.New("user not found")
+	}
+
+	newAccessToken, err := s.jwtSer.SignToken(user)
+	if err != nil {
+		return "", errors.New("failed to generate access token")
+	}
+
+	return newAccessToken, nil
+}
+
+func (s *authService) Logout(ctx context.Context, refreshToken string) error {
+	parts := strings.Split(refreshToken, ".")
+	if len(parts) < 2 {
+		return errors.New("invalid refresh token format")
+	}
+
+	tokenID := parts[0]
+	err := s.userRepo.RevokeRefreshToken(ctx, tokenID)
+	if err != nil {
+		return errors.New("failed to revoke refresh token")
+	}
+
+	return nil
 }
 
 func makeRefreshToken() (string, error) {

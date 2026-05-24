@@ -39,4 +39,6 @@ type AuthService interface {
 	Register(ctx context.Context, req dto.RegisterRequest) error
 	GetMe(ctx context.Context, userID int) (User, error)
 	GoogleLogin(ctx context.Context, idToken string) (string, string, error)
+	RefreshToken(ctx context.Context, refreshToken string) (string, error)
+	Logout(ctx context.Context, refreshToken string) error
 }

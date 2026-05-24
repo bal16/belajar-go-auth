@@ -16,4 +16,6 @@ type UserRepository interface {
 	CreateRefreshToken(ctx context.Context, data UserRefreshToken) error
 	FindByID(ctx context.Context, id int) (User, error)
 	FindOrCreateWithOAuth(ctx context.Context, user UserOauth) (UserOauth, error)
+	RevokeRefreshToken(ctx context.Context, tokenID string) error
+	FindRefreshToken(ctx context.Context, tokenID string) (UserRefreshToken, error)
 }

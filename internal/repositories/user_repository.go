@@ -186,6 +186,39 @@ func (r *userRepository) FindOrCreateWithOAuth(ctx context.Context, user domain.
 	}
 	return user, nil
 }
+func (r *userRepository) RevokeRefreshToken(ctx context.Context, tokenID string) error {
+	_, err := r.db.From(goqu.I("user_refresh_tokens")).
+		Where(goqu.Ex{
+			"id": tokenID,
+		}).
+		Update(goqu.Record{
+			"is_revoked": true,
+		}).
+		ExecContext(ctx)
+	return err
+}
+
+func (r *userRepository) FindRefreshToken(ctx context.Context, tokenID string) (domain.UserRefreshToken, error) {
+	var refreshToken domain.UserRefreshToken
+
+	found, err := r.db.From(goqu.I("user_refresh_tokens")).
+		Where(goqu.Ex{
+			"id":         tokenID,
+			"is_revoked": false,
+			"expires_at": goqu.Op{"gt": goqu.L("NOW()")},
+		}).
+		ScanStructContext(ctx, &refreshToken)
+
+	if err != nil {
+		return domain.UserRefreshToken{}, err
+	}
+
+	if !found {
+		return domain.UserRefreshToken{}, errors.New("refresh token not found or revoked")
+	}
+
+	return refreshToken, nil
+}
 
 func NewUser(db *goqu.Database) domain.UserRepository {
 	return &userRepository{

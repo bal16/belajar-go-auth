@@ -225,3 +225,202 @@ func TestUserRepository_FindByID(t *testing.T) {
 	})
 }
 
+func TestUserRepository_RevokeRefreshToken(t *testing.T) {
+	db, mock, cleanup := setupUserMockDB(t)
+	defer cleanup()
+	repo := repositories.NewUser(db)
+
+	t.Run("Success", func(t *testing.T) {
+		mock.ExpectExec(`(?i)UPDATE.*"user_refresh_tokens".*SET.*"is_revoked".*WHERE.*"id".*`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		err := repo.RevokeRefreshToken(context.Background(), "test-token")
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+	})
+
+	t.Run("Failure", func(t *testing.T) {
+		expectedErr := errors.New("update error")
+		mock.ExpectExec(`(?i)UPDATE.*"user_refresh_tokens".*SET.*"is_revoked".*WHERE.*"id".*`).
+			WillReturnError(expectedErr)
+
+		err := repo.RevokeRefreshToken(context.Background(), "test-token")
+		if err == nil || err.Error() != expectedErr.Error() {
+			t.Errorf("Expected error %v, got %v", expectedErr, err)
+		}
+	})
+}
+
+func TestUserRepository_FindRefreshToken(t *testing.T) {
+	db, mock, cleanup := setupUserMockDB(t)
+	defer cleanup()
+	repo := repositories.NewUser(db)
+
+	t.Run("Success", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"id", "user_id", "token", "is_revoked", "expires_at"}).
+			AddRow(1, 10, "test-token", false, time.Now())
+
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_refresh_tokens".*WHERE.*"id".*`).
+			WillReturnRows(rows)
+
+		token, err := repo.FindRefreshToken(context.Background(), "test-token")
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if token.Token != "test-token" {
+			t.Errorf("Expected token 'test-token', got %v", token.Token)
+		}
+	})
+
+	t.Run("Failure", func(t *testing.T) {
+		expectedErr := errors.New("query error")
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_refresh_tokens".*WHERE.*"id".*`).
+			WillReturnError(expectedErr)
+
+		_, err := repo.FindRefreshToken(context.Background(), "test-token")
+		if err == nil || err.Error() != expectedErr.Error() {
+			t.Errorf("Expected error %v, got %v", expectedErr, err)
+		}
+	})
+
+	t.Run("Not Found", func(t *testing.T) {
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_refresh_tokens".*WHERE.*`).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token", "is_revoked", "expires_at"})) // empty rows
+
+		_, err := repo.FindRefreshToken(context.Background(), "test-token")
+		if err == nil || err.Error() != "refresh token not found or revoked" {
+			t.Errorf("Expected error 'refresh token not found or revoked', got %v", err)
+		}
+	})
+}
+
+func TestUserRepository_FindOrCreateWithOAuth(t *testing.T) {
+	db, mock, cleanup := setupUserMockDB(t)
+	defer cleanup()
+	repo := repositories.NewUser(db)
+
+	oauthUser := domain.UserOauth{
+		User: domain.User{
+			Email: "oauth@example.com",
+			Name:  "OAuth User",
+		},
+		Provider:    "google",
+		ProviderKey: "google-123",
+	}
+
+	t.Run("Success - Auth Exists", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_authentications".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(10))
+		mock.ExpectCommit()
+
+		user, err := repo.FindOrCreateWithOAuth(context.Background(), oauthUser)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if user.ID != 10 {
+			t.Errorf("Expected user ID 10, got %v", user.ID)
+		}
+	})
+
+	t.Run("Success - User Exists No Auth", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_authentications".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"user_id"})) // empty
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"users".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "name"}).AddRow(20, "oauth@example.com", "OAuth User"))
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_authentications".*`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+
+		user, err := repo.FindOrCreateWithOAuth(context.Background(), oauthUser)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if user.ID != 20 {
+			t.Errorf("Expected user ID 20, got %v", user.ID)
+		}
+	})
+
+	t.Run("Success - User Not Exists", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_authentications".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"user_id"})) // empty
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"users".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "name"})) // empty
+		mock.ExpectQuery(`(?i)INSERT.*INTO.*"users".*RETURNING "id"`).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(30))
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_authentications".*`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+
+		user, err := repo.FindOrCreateWithOAuth(context.Background(), oauthUser)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if user.ID != 30 {
+			t.Errorf("Expected user ID 30, got %v", user.ID)
+		}
+	})
+
+	t.Run("Failure - Auth Query Error", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_authentications".*`).
+			WillReturnError(errors.New("auth query error"))
+		mock.ExpectRollback()
+
+		_, err := repo.FindOrCreateWithOAuth(context.Background(), oauthUser)
+		if err == nil || err.Error() != "auth query error" {
+			t.Errorf("Expected 'auth query error', got %v", err)
+		}
+	})
+
+	t.Run("Failure - User Query Error", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_authentications".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"user_id"})) // empty
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"users".*`).
+			WillReturnError(errors.New("user query error"))
+		mock.ExpectRollback()
+
+		_, err := repo.FindOrCreateWithOAuth(context.Background(), oauthUser)
+		if err == nil || err.Error() != "user query error" {
+			t.Errorf("Expected 'user query error', got %v", err)
+		}
+	})
+
+	t.Run("Failure - Insert User Error", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_authentications".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"user_id"})) // empty
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"users".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "name"})) // empty
+		mock.ExpectQuery(`(?i)INSERT.*INTO.*"users".*RETURNING "id"`).
+			WillReturnError(errors.New("insert user error"))
+		mock.ExpectRollback()
+
+		_, err := repo.FindOrCreateWithOAuth(context.Background(), oauthUser)
+		if err == nil || err.Error() != "insert user error" {
+			t.Errorf("Expected 'insert user error', got %v", err)
+		}
+	})
+
+	t.Run("Failure - Insert Auth Error", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"user_authentications".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"user_id"})) // empty
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"users".*`).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "name"})) // empty
+		mock.ExpectQuery(`(?i)INSERT.*INTO.*"users".*RETURNING "id"`).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(30))
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_authentications".*`).
+			WillReturnError(errors.New("insert auth error"))
+		mock.ExpectRollback()
+
+		_, err := repo.FindOrCreateWithOAuth(context.Background(), oauthUser)
+		if err == nil || err.Error() != "insert auth error" {
+			t.Errorf("Expected 'insert auth error', got %v", err)
+		}
+	})
+}
