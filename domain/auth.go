@@ -1,7 +1,10 @@
 package domain
 
 import (
+	"context"
 	"time"
+
+	"auth/dto"
 )
 
 type UserAuth struct {
@@ -25,11 +28,7 @@ type UserEmailAuth struct {
 	Password string `db:"password_hash" json:"-"`
 }
 
-type UserOauth struct {
-	User
-	Provider    string
-	ProviderKey string
-}
-
 type AuthService interface {
+	Login(ctx context.Context, req dto.LoginRequest) (string, string, error)
+	Register(ctx context.Context, req dto.RegisterRequest) error
 }

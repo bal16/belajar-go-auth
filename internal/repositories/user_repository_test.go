@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"auth/domain"
 	"auth/internal/repositories"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -63,6 +65,123 @@ func TestUserRepository_FindByEmailWithLocalAuth(t *testing.T) {
 		}
 		if err := mock.ExpectationsWereMet(); err != nil {
 			t.Errorf("Unfulfilled expectations: %s", err)
+		}
+	})
+}
+
+func TestUserRepository_CreateRefreshToken(t *testing.T) {
+	db, mock, cleanup := setupUserMockDB(t)
+	defer cleanup()
+	repo := repositories.NewUser(db)
+
+	token := domain.UserRefreshToken{
+		UserID:    1,
+		Token:     "test-token",
+		IsRevoked: false,
+		ExpiresAt: time.Now(),
+	}
+
+	t.Run("Success", func(t *testing.T) {
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_refresh_tokens".*`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		err := repo.CreateRefreshToken(context.Background(), token)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("Unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("Failure", func(t *testing.T) {
+		expectedErr := errors.New("insert error")
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_refresh_tokens".*`).
+			WillReturnError(expectedErr)
+
+		err := repo.CreateRefreshToken(context.Background(), token)
+		if err == nil || err.Error() != expectedErr.Error() {
+			t.Errorf("Expected error %v, got %v", expectedErr, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("Unfulfilled expectations: %s", err)
+		}
+	})
+}
+
+func TestUserRepository_CreateWithLocalAuth(t *testing.T) {
+	db, mock, cleanup := setupUserMockDB(t)
+	defer cleanup()
+	repo := repositories.NewUser(db)
+
+	newUser := domain.UserEmailAuth{
+		User: domain.User{
+			Email: "test@example.com",
+			Name:  "Test User",
+		},
+		Password: "secretpassword",
+	}
+
+	t.Run("Success", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)INSERT.*INTO.*"users".*RETURNING "id"`).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_authentications".*`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit()
+
+		err := repo.CreateWithLocalAuth(context.Background(), newUser)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+	})
+
+	t.Run("Failure - Duplicate Email", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)INSERT.*INTO.*"users".*RETURNING "id"`).
+			WillReturnError(errors.New("unique constraint violation"))
+		mock.ExpectRollback()
+
+		err := repo.CreateWithLocalAuth(context.Background(), newUser)
+		if err == nil || err.Error() != "email already exists" {
+			t.Errorf("Expected 'email already exists', got %v", err)
+		}
+	})
+
+	t.Run("Failure - Insert Auth Error", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)INSERT.*INTO.*"users".*RETURNING "id"`).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_authentications".*`).
+			WillReturnError(errors.New("insert auth error"))
+		mock.ExpectRollback()
+
+		err := repo.CreateWithLocalAuth(context.Background(), newUser)
+		if err == nil || err.Error() != "insert auth error" {
+			t.Errorf("Expected 'insert auth error', got %v", err)
+		}
+	})
+
+	t.Run("Failure - Commit Error", func(t *testing.T) {
+		mock.ExpectBegin()
+		mock.ExpectQuery(`(?i)INSERT.*INTO.*"users".*RETURNING "id"`).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_authentications".*`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+		mock.ExpectCommit().WillReturnError(errors.New("commit error"))
+
+		err := repo.CreateWithLocalAuth(context.Background(), newUser)
+		if err == nil || err.Error() != "commit error" {
+			t.Errorf("Expected 'commit error', got %v", err)
+		}
+	})
+
+	t.Run("Failure - Begin Transaction", func(t *testing.T) {
+		mock.ExpectBegin().WillReturnError(errors.New("begin error"))
+
+		err := repo.CreateWithLocalAuth(context.Background(), newUser)
+		if err == nil || err.Error() != "begin error" {
+			t.Errorf("Expected 'begin error', got %v", err)
 		}
 	})
 }

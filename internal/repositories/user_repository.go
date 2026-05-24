@@ -3,6 +3,8 @@ package repositories
 import (
 	"auth/domain"
 	"context"
+	"errors"
+	"strings"
 
 	"github.com/doug-martin/goqu"
 )
@@ -36,6 +38,62 @@ func (r *userRepository) FindByEmailWithLocalAuth(ctx context.Context, email str
 	}
 
 	return user, nil
+}
+
+func (r *userRepository) CreateWithLocalAuth(ctx context.Context, user domain.UserEmailAuth) error {
+	tx, err := r.db.Begin()
+
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	_, err = tx.From(goqu.I("users")).
+		Returning("id").
+		Insert(goqu.Record{
+			"email": user.Email,
+			"name":  user.Name,
+		}).
+		ScanValContext(ctx, &user.ID)
+
+	if err != nil {
+		if strings.Contains(err.Error(), "unique constraint") {
+			return errors.New("email already exists")
+		}
+		return err
+	}
+
+	_, err = tx.From("user_authentications").
+		Insert(goqu.Record{
+			"user_id":       user.ID,
+			"provider":      "local",
+			"provider_key":  user.Email,
+			"password_hash": user.Password,
+		}).
+		ExecContext(ctx)
+
+	if err != nil {
+		return err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *userRepository) CreateRefreshToken(ctx context.Context, data domain.UserRefreshToken) error {
+	_, err := r.db.From(goqu.I("user_refresh_tokens")).
+		Insert(goqu.Record{
+			"id":         data.ID,
+			"user_id":    data.UserID,
+			"token":      data.Token,
+			"is_revoked": data.IsRevoked,
+			"expires_at": data.ExpiresAt,
+		}).
+		ExecContext(ctx)
+
+	return err
 }
 
 func NewUser(db *goqu.Database) domain.UserRepository {
