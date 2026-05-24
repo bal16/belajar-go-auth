@@ -2,6 +2,7 @@ package server
 
 import (
 	"auth/internal/handlers"
+	"auth/internal/middlewares"
 	"io"
 	"net/http"
 	"os"
@@ -23,7 +24,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	e.Logger.Infof("log level set to: %v", e.Logger.Level())
 
-	cm := NewCustomMiddleware(s.jwtSer)
+	cm := middlewares.New(s.jwtSer)
 
 	e.Logger.Info("Registering routes...")
 	hh := handlers.NewHealthHandler(s.healthSer)
