@@ -1,0 +1,41 @@
+meta {
+  name: Sign In
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{BASE_URL}}/auth/login
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email":"{{process.env.USER_EMAIL}}",
+    "password":"{{process.env.USER_PASSWORD}}"  
+  }
+  
+  
+  
+  
+}
+
+script:post-response {
+  const at = res.body.data?.access_token
+  const rt = res.body.data?.refresh_token
+  
+  
+  if(at && rt){
+    bru.setEnvVar("ACCESS_TOKEN", at)
+    bru.setEnvVar("REFRESH_TOKEN", rt)  
+    
+  }
+  
+  
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

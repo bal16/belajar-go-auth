@@ -1,0 +1,24 @@
+meta {
+  name: Google Sign In
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{BASE_URL}}/auth/google
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "id_token":"{{process.env.GOOGLE_ID_TOKEN}}"
+  }
+  
+  
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

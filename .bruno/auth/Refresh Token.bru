@@ -1,0 +1,36 @@
+meta {
+  name: Refresh Token
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{BASE_URL}}/auth/refresh
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "refresh_token":"{{REFRESH_TOKEN}}"
+  }
+  
+  
+}
+
+script:post-response {
+  const at = res.body.data?.access_token
+  const rt = res.body.data?.refresh_token
+  
+  if(at && rt){
+    bru.setEnvVar("ACCESS_TOKEN", at)
+    bru.setEnvVar("REFRESH_TOKEN", rt)  
+  }
+  
+  
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

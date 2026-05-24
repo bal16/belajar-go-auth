@@ -1,0 +1,33 @@
+meta {
+  name: Sign Out
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{BASE_URL}}/auth/logout
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "refresh_token":"{{REFRESH_TOKEN}}"
+  }
+  
+  
+}
+
+script:post-response {
+  const success = res.body?.success
+  
+  if (success){
+    bru.deleteEnvVar("ACCESS_TOKEN")
+    bru.deleteEnvVar("REFRESH_TOKEN")
+  }
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

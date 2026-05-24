@@ -1,0 +1,28 @@
+meta {
+  name: Sign Up
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{BASE_URL}}/auth/register
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "email":"{{process.env.USER_EMAIL}}",
+    "password":"{{process.env.USER_PASSWORD}}",
+    "name":"{{process.env.USER_NAME}}"
+  }
+  
+  
+  
+  
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}
