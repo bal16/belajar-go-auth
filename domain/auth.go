@@ -28,8 +28,15 @@ type UserEmailAuth struct {
 	Password string `db:"password_hash" json:"-"`
 }
 
+type UserOauth struct {
+	User
+	Provider    string
+	ProviderKey string
+}
+
 type AuthService interface {
 	Login(ctx context.Context, req dto.LoginRequest) (string, string, error)
 	Register(ctx context.Context, req dto.RegisterRequest) error
 	GetMe(ctx context.Context, userID int) (User, error)
+	GoogleLogin(ctx context.Context, idToken string) (string, string, error)
 }

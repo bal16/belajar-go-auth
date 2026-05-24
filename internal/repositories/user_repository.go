@@ -112,6 +112,81 @@ func (r *userRepository) FindByID(ctx context.Context, id int) (domain.User, err
 	return user, nil
 }
 
+func (r *userRepository) FindOrCreateWithOAuth(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error) {
+	tx, err := r.db.Begin()
+
+	if err != nil {
+		return domain.UserOauth{}, err
+	}
+	defer tx.Rollback()
+
+	var existingAuth domain.UserAuth
+	foundAuth, err := tx.From(goqu.I("user_authentications")).
+		Where(goqu.Ex{
+			"provider":     user.Provider,
+			"provider_key": user.ProviderKey,
+		}).
+		ScanStructContext(ctx, &existingAuth)
+
+	if err != nil {
+		return domain.UserOauth{}, err
+	}
+
+	if foundAuth {
+		user.ID = existingAuth.UserID
+
+	} else {
+		var existingUser domain.User
+		foundUser, err := tx.From("users").
+			Where(goqu.Ex{
+				"email": user.Email,
+			}).
+			Select(
+				goqu.I("id"),
+				goqu.I("email"),
+				goqu.I("name"),
+			).
+			ScanStructContext(ctx, &existingUser)
+
+		if err != nil {
+			return domain.UserOauth{}, err
+		}
+
+		if !foundUser {
+			_, err = tx.From(goqu.I("users")).
+				Returning("id").
+				Insert(goqu.Record{
+					"email": user.Email,
+					"name":  user.Name,
+				}).
+				ScanValContext(ctx, &user.ID)
+
+			if err != nil {
+				return domain.UserOauth{}, err
+			}
+		} else {
+			user.ID = existingUser.ID
+		}
+
+		_, err = tx.From(goqu.I("user_authentications")).
+			Insert(goqu.Record{
+				"user_id":      user.ID,
+				"provider":     user.Provider,
+				"provider_key": user.ProviderKey,
+			}).
+			ExecContext(ctx)
+
+		if err != nil {
+			return domain.UserOauth{}, err
+		}
+	}
+
+	if err = tx.Commit(); err != nil {
+		return domain.UserOauth{}, err
+	}
+	return user, nil
+}
+
 func NewUser(db *goqu.Database) domain.UserRepository {
 	return &userRepository{
 		db,

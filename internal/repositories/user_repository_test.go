@@ -224,3 +224,4 @@ func TestUserRepository_FindByID(t *testing.T) {
 		}
 	})
 }
+

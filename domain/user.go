@@ -15,4 +15,5 @@ type UserRepository interface {
 	CreateWithLocalAuth(ctx context.Context, user UserEmailAuth) error
 	CreateRefreshToken(ctx context.Context, data UserRefreshToken) error
 	FindByID(ctx context.Context, id int) (User, error)
+	FindOrCreateWithOAuth(ctx context.Context, user UserOauth) (UserOauth, error)
 }

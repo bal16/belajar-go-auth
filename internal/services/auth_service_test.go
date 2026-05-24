@@ -11,11 +11,13 @@ import (
 	"auth/internal/services"
 
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/api/idtoken"
 )
 
 type mockedData struct {
-	user             domain.User
-	userWithPassword domain.UserEmailAuth
+	user                domain.User
+	userWithPassword    domain.UserEmailAuth
+	userWithGoogleOAuth domain.UserOauth
 }
 
 func getMockedData() mockedData {
@@ -32,6 +34,11 @@ func getMockedData() mockedData {
 			User:     baseUser,
 			Password: string(hashedPassword),
 		},
+		userWithGoogleOAuth: domain.UserOauth{
+			User:        baseUser,
+			Provider:    "google",
+			ProviderKey: "google-id-token",
+		},
 	}
 }
 
@@ -42,6 +49,7 @@ type mockUserRepository struct {
 	createWithLocalAuthFunc      func(ctx context.Context, user domain.UserEmailAuth) error
 	createRefreshTokenFunc       func(ctx context.Context, token domain.UserRefreshToken) error
 	findByIDFunc                 func(ctx context.Context, id int) (domain.User, error)
+	findOrCreateWithOAuthFunc    func(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error)
 }
 
 func (m *mockUserRepository) FindByEmailWithLocalAuth(ctx context.Context, email string) (domain.UserEmailAuth, error) {
@@ -61,6 +69,10 @@ func (m *mockUserRepository) CreateRefreshToken(ctx context.Context, token domai
 
 func (m *mockUserRepository) FindByID(ctx context.Context, id int) (domain.User, error) {
 	return m.findByIDFunc(ctx, id)
+}
+
+func (m *mockUserRepository) FindOrCreateWithOAuth(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error) {
+	return m.findOrCreateWithOAuthFunc(ctx, user)
 }
 
 // --- Mock JWTService ---
@@ -293,6 +305,145 @@ func TestAuthService_GetMe(t *testing.T) {
 		}
 		if err != nil && err.Error() != "user not found" {
 			t.Errorf("Expected 'user not found' error, got %v", err.Error())
+		}
+	})
+}
+
+func TestAuthService_GoogleLogin(t *testing.T) {
+	// Save the original validator and restore it after these tests are done
+	originalValidator := services.ValidateGoogleIDToken
+	defer func() { services.ValidateGoogleIDToken = originalValidator }()
+
+	t.Run("Success", func(t *testing.T) {
+		services.ValidateGoogleIDToken = func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
+			return &idtoken.Payload{
+				Subject: "google-id-token",
+				Claims: map[string]interface{}{
+					"email": "test@example.com",
+					"name":  "Test User",
+				},
+			}, nil
+		}
+
+		mockRepo := &mockUserRepository{
+			findOrCreateWithOAuthFunc: func(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error) {
+				return getMockedData().userWithGoogleOAuth, nil
+			},
+			createRefreshTokenFunc: func(ctx context.Context, token domain.UserRefreshToken) error {
+				return nil
+			},
+		}
+		mockJWT := &mockJWTService{
+			signTokenFunc: func(user domain.User) (string, error) {
+				return "mocked.jwt.token", nil
+			},
+		}
+		service := services.NewAuthService(mockRepo, mockJWT)
+
+		accessToken, refreshToken, err := service.GoogleLogin(context.Background(), "mocked.google.token")
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if accessToken != "mocked.jwt.token" {
+			t.Errorf("Expected token 'mocked.jwt.token', got %v", accessToken)
+		}
+		parts := strings.Split(refreshToken, ".")
+		if len(parts) != 2 || len(parts[1]) != 64 {
+			t.Errorf("Expected refresh token format 'id.token' with token length 64, got %s", refreshToken)
+		}
+	})
+
+	t.Run("Invalid Token", func(t *testing.T) {
+		services.ValidateGoogleIDToken = func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
+			return nil, errors.New("invalid signature")
+		}
+
+		mockRepo := &mockUserRepository{
+			findOrCreateWithOAuthFunc: func(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error) {
+				return getMockedData().userWithGoogleOAuth, nil
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		_, _, err := service.GoogleLogin(context.Background(), "mocked.google.token")
+		if err == nil || err.Error() != "Invalid Google ID token" {
+			t.Errorf("Expected 'Invalid Google ID token' error, got %v", err)
+		}
+	})
+
+	t.Run("Database Error on FindOrCreate", func(t *testing.T) {
+		services.ValidateGoogleIDToken = func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
+			return &idtoken.Payload{
+				Subject: "google-id-token",
+				Claims:  map[string]interface{}{},
+			}, nil
+		}
+
+		mockRepo := &mockUserRepository{
+			findOrCreateWithOAuthFunc: func(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error) {
+				return domain.UserOauth{}, errors.New("db connection lost")
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		_, _, err := service.GoogleLogin(context.Background(), "mocked.google.token")
+		if err == nil || err.Error() != "failed to authenticate with Google" {
+			t.Errorf("Expected 'failed to authenticate with Google' error, got %v", err)
+		}
+	})
+
+	t.Run("Token Generation Failed", func(t *testing.T) {
+		services.ValidateGoogleIDToken = func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
+			return &idtoken.Payload{
+				Subject: "google-id-token",
+				Claims:  map[string]interface{}{},
+			}, nil
+		}
+
+		mockRepo := &mockUserRepository{
+			findOrCreateWithOAuthFunc: func(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error) {
+				return getMockedData().userWithGoogleOAuth, nil
+			},
+		}
+		mockJWT := &mockJWTService{
+			signTokenFunc: func(user domain.User) (string, error) {
+				return "", errors.New("jwt signing error")
+			},
+		}
+		service := services.NewAuthService(mockRepo, mockJWT)
+
+		_, _, err := service.GoogleLogin(context.Background(), "mocked.google.token")
+		if err == nil || err.Error() != "failed to generate access token" {
+			t.Errorf("Expected 'failed to generate access token' error, got %v", err)
+		}
+	})
+
+	t.Run("Refresh Token Save Failed", func(t *testing.T) {
+		services.ValidateGoogleIDToken = func(ctx context.Context, idToken string, audience string) (*idtoken.Payload, error) {
+			return &idtoken.Payload{
+				Subject: "google-id-token",
+				Claims:  map[string]interface{}{},
+			}, nil
+		}
+
+		mockRepo := &mockUserRepository{
+			findOrCreateWithOAuthFunc: func(ctx context.Context, user domain.UserOauth) (domain.UserOauth, error) {
+				return getMockedData().userWithGoogleOAuth, nil
+			},
+			createRefreshTokenFunc: func(ctx context.Context, token domain.UserRefreshToken) error {
+				return errors.New("db insert error")
+			},
+		}
+		mockJWT := &mockJWTService{
+			signTokenFunc: func(user domain.User) (string, error) {
+				return "mocked.jwt.token", nil
+			},
+		}
+		service := services.NewAuthService(mockRepo, mockJWT)
+
+		_, _, err := service.GoogleLogin(context.Background(), "mocked.google.token")
+		if err == nil || err.Error() != "failed to save refresh token" {
+			t.Errorf("Expected 'failed to save refresh token' error, got %v", err)
 		}
 	})
 }

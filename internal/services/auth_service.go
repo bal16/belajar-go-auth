@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/nrednav/cuid2"
@@ -104,6 +105,75 @@ func (s *authService) GetMe(ctx context.Context, userId int) (domain.User, error
 	}
 
 	return user, nil
+}
+
+func (s *authService) GoogleLogin(ctx context.Context, idToken string) (string, string, error) {
+	payload, err := ValidateGoogleIDToken(ctx, idToken, "")
+	if err != nil {
+		log.Printf("Token tidak valid: %v", err)
+		return "", "", errors.New("Invalid Google ID token")
+	}
+
+	googleUID := payload.Subject
+
+	var email, name string
+
+	if e, ok := payload.Claims["email"].(string); ok {
+		email = e
+	}
+	if n, ok := payload.Claims["name"].(string); ok {
+		name = n
+	}
+	// if p, ok := payload.Claims["picture"].(string); ok {
+	// 	picture = p
+	// }
+	// if ev, ok := payload.Claims["email_verified"].(bool); ok {
+	// 	emailVerified = ev
+	// }
+	user, err := s.userRepo.FindOrCreateWithOAuth(ctx, domain.UserOauth{
+		User: domain.User{
+			Name:  name,
+			Email: email,
+		},
+		Provider:    "google",
+		ProviderKey: googleUID,
+	})
+
+	if err != nil {
+		return "", "", errors.New("failed to authenticate with Google")
+	}
+
+	accessToken, err := s.jwtSer.SignToken(domain.User{
+		ID:    user.ID,
+		Name:  user.Name,
+		Email: user.Email,
+	})
+
+	if err != nil {
+		return "", "", errors.New("failed to generate access token")
+	}
+
+	refreshToken, err := makeRefreshToken()
+	if err != nil {
+		return "", "", errors.New("failed to generate refresh token")
+	}
+
+	refreshTokenData := domain.UserRefreshToken{
+		ID:        cuid2.Generate(),
+		UserID:    user.ID,
+		Token:     refreshToken,
+		IsRevoked: false,
+		ExpiresAt: time.Now().Add(7 * 24 * time.Hour),
+	}
+
+	err = s.userRepo.CreateRefreshToken(ctx, refreshTokenData)
+	if err != nil {
+		return "", "", errors.New("failed to save refresh token")
+	}
+
+	validRefreshToken := refreshTokenData.ID + "." + refreshToken
+
+	return accessToken, validRefreshToken, nil
 }
 
 func makeRefreshToken() (string, error) {
