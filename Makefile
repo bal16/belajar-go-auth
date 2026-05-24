@@ -66,8 +66,9 @@ watch:
             fi; \
         fi
 
-.PHONY: all build run test clean watch docker-run docker-down itest test-integration
-
 dbmigrate:
 	@echo "Running database migrations..."
 	@go run ./cmd/database/migration.go
+	
+.PHONY: all build run test clean watch docker-run docker-down itest test-integration
+
