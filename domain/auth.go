@@ -31,4 +31,5 @@ type UserEmailAuth struct {
 type AuthService interface {
 	Login(ctx context.Context, req dto.LoginRequest) (string, string, error)
 	Register(ctx context.Context, req dto.RegisterRequest) error
+	GetMe(ctx context.Context, userID int) (User, error)
 }

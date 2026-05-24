@@ -97,6 +97,15 @@ func (s *authService) Register(ctx context.Context, req dto.RegisterRequest) err
 	return nil
 }
 
+func (s *authService) GetMe(ctx context.Context, userId int) (domain.User, error) {
+	user, err := s.userRepo.FindByID(ctx, userId)
+	if err != nil {
+		return domain.User{}, errors.New("user not found")
+	}
+
+	return user, nil
+}
+
 func makeRefreshToken() (string, error) {
 	refreshToken := make([]byte, 32)
 	if _, err := rand.Read(refreshToken); err != nil {

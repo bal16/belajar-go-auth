@@ -69,46 +69,6 @@ func TestUserRepository_FindByEmailWithLocalAuth(t *testing.T) {
 	})
 }
 
-func TestUserRepository_CreateRefreshToken(t *testing.T) {
-	db, mock, cleanup := setupUserMockDB(t)
-	defer cleanup()
-	repo := repositories.NewUser(db)
-
-	token := domain.UserRefreshToken{
-		UserID:    1,
-		Token:     "test-token",
-		IsRevoked: false,
-		ExpiresAt: time.Now(),
-	}
-
-	t.Run("Success", func(t *testing.T) {
-		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_refresh_tokens".*`).
-			WillReturnResult(sqlmock.NewResult(1, 1))
-
-		err := repo.CreateRefreshToken(context.Background(), token)
-		if err != nil {
-			t.Errorf("Expected no error, got %v", err)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Errorf("Unfulfilled expectations: %s", err)
-		}
-	})
-
-	t.Run("Failure", func(t *testing.T) {
-		expectedErr := errors.New("insert error")
-		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_refresh_tokens".*`).
-			WillReturnError(expectedErr)
-
-		err := repo.CreateRefreshToken(context.Background(), token)
-		if err == nil || err.Error() != expectedErr.Error() {
-			t.Errorf("Expected error %v, got %v", expectedErr, err)
-		}
-		if err := mock.ExpectationsWereMet(); err != nil {
-			t.Errorf("Unfulfilled expectations: %s", err)
-		}
-	})
-}
-
 func TestUserRepository_CreateWithLocalAuth(t *testing.T) {
 	db, mock, cleanup := setupUserMockDB(t)
 	defer cleanup()
@@ -182,6 +142,85 @@ func TestUserRepository_CreateWithLocalAuth(t *testing.T) {
 		err := repo.CreateWithLocalAuth(context.Background(), newUser)
 		if err == nil || err.Error() != "begin error" {
 			t.Errorf("Expected 'begin error', got %v", err)
+		}
+	})
+}
+
+func TestUserRepository_CreateRefreshToken(t *testing.T) {
+	db, mock, cleanup := setupUserMockDB(t)
+	defer cleanup()
+	repo := repositories.NewUser(db)
+
+	token := domain.UserRefreshToken{
+		UserID:    1,
+		Token:     "test-token",
+		IsRevoked: false,
+		ExpiresAt: time.Now(),
+	}
+
+	t.Run("Success", func(t *testing.T) {
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_refresh_tokens".*`).
+			WillReturnResult(sqlmock.NewResult(1, 1))
+
+		err := repo.CreateRefreshToken(context.Background(), token)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("Unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("Failure", func(t *testing.T) {
+		expectedErr := errors.New("insert error")
+		mock.ExpectExec(`(?i)INSERT.*INTO.*"user_refresh_tokens".*`).
+			WillReturnError(expectedErr)
+
+		err := repo.CreateRefreshToken(context.Background(), token)
+		if err == nil || err.Error() != expectedErr.Error() {
+			t.Errorf("Expected error %v, got %v", expectedErr, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("Unfulfilled expectations: %s", err)
+		}
+	})
+}
+
+func TestUserRepository_FindByID(t *testing.T) {
+	db, mock, cleanup := setupUserMockDB(t)
+	defer cleanup()
+	repo := repositories.NewUser(db)
+
+	t.Run("Success", func(t *testing.T) {
+		rows := sqlmock.NewRows([]string{"id", "email", "name"}).
+			AddRow(1, "test@example.com", "Test User")
+
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"users".*WHERE.*"id".*1.*`).
+			WillReturnRows(rows)
+
+		user, err := repo.FindByID(context.Background(), 1)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if user.ID != 1 {
+			t.Errorf("Expected user ID 1, got %v", user.ID)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("Unfulfilled expectations: %s", err)
+		}
+	})
+
+	t.Run("Failure", func(t *testing.T) {
+		expectedErr := errors.New("db query error")
+		mock.ExpectQuery(`(?i)SELECT.*FROM.*"users".*WHERE.*"id".*1.*`).
+			WillReturnError(expectedErr)
+
+		_, err := repo.FindByID(context.Background(), 1)
+		if err == nil || err.Error() != expectedErr.Error() {
+			t.Errorf("Expected error %v, got %v", expectedErr, err)
+		}
+		if err := mock.ExpectationsWereMet(); err != nil {
+			t.Errorf("Unfulfilled expectations: %s", err)
 		}
 	})
 }

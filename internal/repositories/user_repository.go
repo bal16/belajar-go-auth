@@ -96,6 +96,22 @@ func (r *userRepository) CreateRefreshToken(ctx context.Context, data domain.Use
 	return err
 }
 
+func (r *userRepository) FindByID(ctx context.Context, id int) (domain.User, error) {
+	var user domain.User
+
+	_, err := r.db.From("users").
+		Where(goqu.Ex{
+			"id": id,
+		}).
+		ScanStructContext(ctx, &user)
+
+	if err != nil {
+		return domain.User{}, err
+	}
+
+	return user, nil
+}
+
 func NewUser(db *goqu.Database) domain.UserRepository {
 	return &userRepository{
 		db,

@@ -41,6 +41,7 @@ type mockUserRepository struct {
 	findByEmailWithLocalAuthFunc func(ctx context.Context, email string) (domain.UserEmailAuth, error)
 	createWithLocalAuthFunc      func(ctx context.Context, user domain.UserEmailAuth) error
 	createRefreshTokenFunc       func(ctx context.Context, token domain.UserRefreshToken) error
+	findByIDFunc                 func(ctx context.Context, id int) (domain.User, error)
 }
 
 func (m *mockUserRepository) FindByEmailWithLocalAuth(ctx context.Context, email string) (domain.UserEmailAuth, error) {
@@ -56,6 +57,10 @@ func (m *mockUserRepository) CreateRefreshToken(ctx context.Context, token domai
 		return m.createRefreshTokenFunc(ctx, token)
 	}
 	return nil
+}
+
+func (m *mockUserRepository) FindByID(ctx context.Context, id int) (domain.User, error) {
+	return m.findByIDFunc(ctx, id)
 }
 
 // --- Mock JWTService ---
@@ -252,6 +257,42 @@ func TestAuthService_Register(t *testing.T) {
 		err := service.Register(context.Background(), dto.RegisterRequest{Email: "test@example.com", Password: "secret123"})
 		if err == nil || err.Error() != "Failed to create user. Unknown error" {
 			t.Errorf("Expected 'Failed to create user. Unknown error' error, got %v", err)
+		}
+	})
+}
+
+func TestAuthService_GetMe(t *testing.T) {
+	t.Run("Success", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			findByIDFunc: func(ctx context.Context, id int) (domain.User, error) {
+				return getMockedData().user, nil
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		user, err := service.GetMe(context.Background(), 1)
+		if err != nil {
+			t.Errorf("Expected no error, got %v", err)
+		}
+		if user.ID != 1 || user.Email != "test@example.com" || user.Name != "Test User" {
+			t.Errorf("Expected user ID 1, email test@example.com, and name Test User, got %+v", user)
+		}
+	})
+
+	t.Run("User Not Found", func(t *testing.T) {
+		mockRepo := &mockUserRepository{
+			findByIDFunc: func(ctx context.Context, id int) (domain.User, error) {
+				return domain.User{}, errors.New("db error not found")
+			},
+		}
+		service := services.NewAuthService(mockRepo, &mockJWTService{})
+
+		_, err := service.GetMe(context.Background(), 99)
+		if err == nil {
+			t.Error("Expected error, got nil")
+		}
+		if err != nil && err.Error() != "user not found" {
+			t.Errorf("Expected 'user not found' error, got %v", err.Error())
 		}
 	})
 }
