@@ -23,10 +23,13 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	e.Logger.Infof("log level set to: %v", e.Logger.Level())
 
+	cm := NewCustomMiddleware(s.jwtSer)
 
 	e.Logger.Info("Registering routes...")
 	hh := handlers.NewHealthHandler(s.healthSer)
 	e.Logger.Info("HealthHandler registered successfully.")
+	ah := handlers.NewAuthHandler(s.authSer)
+	e.Logger.Info("AuthHandler registered successfully.")
 
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogURI:    true,
@@ -51,6 +54,15 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	e.GET("/", hh.HelloWorldHandler)
 	e.GET("/health", hh.HealthHandler)
+
+	auth := e.Group("/auth")
+
+	auth.POST("/register", ah.Register)
+	auth.POST("/login", ah.Login)
+	auth.POST("/refresh", ah.RefreshToken)
+	auth.POST("/google", ah.GoogleLogin)
+	auth.GET("/me", ah.GetMe, cm.AuthMiddleware)
+	auth.DELETE("/logout", ah.Logout)
 
 	return e
 }

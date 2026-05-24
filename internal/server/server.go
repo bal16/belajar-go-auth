@@ -28,15 +28,20 @@ func NewServer() *http.Server {
 
 	port, _ := strconv.Atoi(cnf.Server.PORT)
 
-	_, sqlDB := connection.GetDatabase(cnf.Database)
+	dbConnection, sqlDB := connection.GetDatabase(cnf.Database)
 
 	customValidator := services.NewCustomValidator(v.New())
 
+	jwtSer := services.NewJWTService(cnf)
+	userRepo := repositories.NewUser(dbConnection)
+	authSer := services.NewAuthService(userRepo, jwtSer)
 	healthRepo := repositories.NewHealthRepository(sqlDB)
 	healthSer := services.NewHealthService(healthRepo)
 
 	NewServer := &Server{
 		port:      port,
+		authSer:   authSer,
+		jwtSer:    jwtSer,
 		healthSer: healthSer,
 		validator: customValidator,
 	}
