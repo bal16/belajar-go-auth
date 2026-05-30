@@ -29,7 +29,7 @@ func (s *jwtService) SignToken(user domain.User) (string, error) {
 	return token.SignedString([]byte(s.conf.JWT.SECRET))
 }
 
-func (s *jwtService) ParseToken(tokenString string) (int, error) {
+func (s *jwtService) ParseToken(tokenString string) (domain.UserRoles, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &domain.JwtClaims{}, func(token *jwt.Token) (any, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, errors.New("unexpected signing method")
@@ -38,17 +38,23 @@ func (s *jwtService) ParseToken(tokenString string) (int, error) {
 	})
 
 	if err != nil {
-		return 0, err
+		return domain.UserRoles{}, err
 	}
 
 	if claims, ok := token.Claims.(*domain.JwtClaims); ok && token.Valid {
 		if claims.UserID == 0 {
-			return 0, errors.New("invalid token: missing user payload")
+			return domain.UserRoles{}, errors.New("invalid token: missing user payload")
 		}
-		return claims.UserID, nil
+		return domain.UserRoles{
+			User: domain.User{
+				ID:    claims.UserID,
+				Email: claims.Email,
+			},
+			Roles: claims.Roles,
+		}, nil
 	}
 
-	return 0, errors.New("invalid token")
+	return domain.UserRoles{}, errors.New("invalid token")
 }
 
 func NewJWTService(conf *config.Config) domain.JWTService {

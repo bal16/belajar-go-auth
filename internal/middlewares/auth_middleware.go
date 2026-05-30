@@ -30,7 +30,7 @@ func (m customMiddleware) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 
 		tokenString := parts[1]
 
-		userID, err := m.jwtSer.ParseToken(tokenString)
+		user, err := m.jwtSer.ParseToken(tokenString)
 
 		if err != nil {
 			return c.JSON(http.StatusUnauthorized, dto.ErrorResponse{
@@ -40,7 +40,9 @@ func (m customMiddleware) AuthMiddleware(next echo.HandlerFunc) echo.HandlerFunc
 			})
 		}
 
-		c.Set("user_id", userID)
+		c.Set("user_id", user.ID)
+		c.Set("user_email", user.Email)
+		c.Set("user_roles", user.Roles)
 
 		return next(c)
 	}

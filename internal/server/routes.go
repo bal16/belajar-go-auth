@@ -24,7 +24,7 @@ func (s *Server) RegisterRoutes() http.Handler {
 
 	e.Logger.Infof("log level set to: %v", e.Logger.Level())
 
-	cm := middlewares.New(s.jwtSer)
+	cm := middlewares.New(s.jwtSer, s.rbacSer)
 
 	e.Logger.Info("Registering routes...")
 	hh := handlers.NewHealthHandler(s.healthSer)
@@ -62,7 +62,9 @@ func (s *Server) RegisterRoutes() http.Handler {
 	auth.POST("/login", ah.Login)
 	auth.POST("/refresh", ah.RefreshToken)
 	auth.POST("/google", ah.GoogleLogin)
-	auth.GET("/me", ah.GetMe, cm.AuthMiddleware)
+	auth.GET("/me", ah.GetMe, cm.AuthMiddleware, func(next echo.HandlerFunc) echo.HandlerFunc {
+		return cm.RBACMiddleware(next, "user.read")
+	})
 	auth.DELETE("/logout", ah.Logout)
 
 	return e

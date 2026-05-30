@@ -5,11 +5,13 @@ import (
 )
 
 type customMiddleware struct {
-	jwtSer domain.JWTService
+	jwtSer  domain.JWTService
+	rbacSer domain.RBACService
 }
 
-func New(jwtSer domain.JWTService) *customMiddleware {
+func New(jwtSer domain.JWTService, rbacSer domain.RBACService) *customMiddleware {
 	return &customMiddleware{
-		jwtSer: jwtSer,
+		jwtSer:  jwtSer,
+		rbacSer: rbacSer,
 	}
 }

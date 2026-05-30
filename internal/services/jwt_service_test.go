@@ -46,33 +46,47 @@ func TestJWTService_ParseToken(t *testing.T) {
 	jwtSvc := services.NewJWTService(conf)
 
 	t.Run("Valid Token", func(t *testing.T) {
-		user := domain.User{
-			ID:    1,
-			Email: "test@example.com",
+		// Create a custom token to test both User and Roles parsing
+		claims := &domain.JwtClaims{
+			Email:  "test@example.com",
+			UserID: 1,
+			Roles:  []string{"admin", "user"},
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute * 15)),
+				IssuedAt:  jwt.NewNumericDate(time.Now()),
+			},
 		}
-		token, err := jwtSvc.SignToken(user)
-		if err != nil {
-			t.Fatalf("Failed to sign token: %v", err)
-		}
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, _ := token.SignedString([]byte(conf.JWT.SECRET))
 
-		userID, err := jwtSvc.ParseToken(token)
+		userRoles, err := jwtSvc.ParseToken(tokenString)
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
 		}
-		if userID != user.ID {
-			t.Errorf("Expected user ID %d, got %d", user.ID, userID)
+		if userRoles.User.ID != 1 {
+			t.Errorf("Expected user ID 1, got %d", userRoles.User.ID)
+		}
+		if userRoles.User.Email != "test@example.com" {
+			t.Errorf("Expected email 'test@example.com', got %s", userRoles.User.Email)
+		}
+		if len(userRoles.Roles) != 2 || userRoles.Roles[0] != "admin" {
+			t.Errorf("Expected roles [admin, user], got %v", userRoles.Roles)
 		}
 	})
 
 	t.Run("Missing User Payload", func(t *testing.T) {
 		// Create a token where UserID is 0
-		user := domain.User{
-			ID:    0,
-			Email: "test@example.com",
+		claims := &domain.JwtClaims{
+			Email:  "test@example.com",
+			UserID: 0,
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Minute * 15)),
+			},
 		}
-		token, _ := jwtSvc.SignToken(user)
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, _ := token.SignedString([]byte(conf.JWT.SECRET))
 
-		_, err := jwtSvc.ParseToken(token)
+		_, err := jwtSvc.ParseToken(tokenString)
 		if err == nil {
 			t.Error("Expected error, got nil")
 		} else if err.Error() != "invalid token: missing user payload" {
@@ -115,6 +129,30 @@ func TestJWTService_ParseToken(t *testing.T) {
 			t.Error("Expected error, got nil")
 		} else if !strings.Contains(err.Error(), "unexpected signing method") {
 			t.Errorf("Expected 'unexpected signing method' error, got %v", err)
+		}
+	})
+
+	t.Run("Expired Token", func(t *testing.T) {
+		claims := &domain.JwtClaims{
+			Email:  "test@example.com",
+			UserID: 1,
+			RegisteredClaims: jwt.RegisteredClaims{
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(-15 * time.Minute)), // Passed expiration
+			},
+		}
+		token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+		tokenString, _ := token.SignedString([]byte(conf.JWT.SECRET))
+
+		_, err := jwtSvc.ParseToken(tokenString)
+		if err == nil {
+			t.Error("Expected error for expired token, got nil")
+		}
+	})
+
+	t.Run("Malformed Token String", func(t *testing.T) {
+		_, err := jwtSvc.ParseToken("not.a.valid.jwt.token")
+		if err == nil {
+			t.Error("Expected error for malformed token string, got nil")
 		}
 	})
 }

@@ -96,14 +96,14 @@ func (m *mockUserRepository) FindRefreshToken(ctx context.Context, token string)
 
 type mockJWTService struct {
 	signTokenFunc  func(user domain.User) (string, error)
-	parseTokenFunc func(tokenString string) (int, error)
+	parseTokenFunc func(tokenString string) (domain.UserRoles, error)
 }
 
 func (m *mockJWTService) SignToken(user domain.User) (string, error) {
 	return m.signTokenFunc(user)
 }
 
-func (m *mockJWTService) ParseToken(tokenString string) (int, error) {
+func (m *mockJWTService) ParseToken(tokenString string) (domain.UserRoles, error) {
 	return m.parseTokenFunc(tokenString)
 }
 

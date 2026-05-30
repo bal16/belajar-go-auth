@@ -19,6 +19,7 @@ type Server struct {
 	port      int
 	authSer   domain.AuthService
 	jwtSer    domain.JWTService
+	rbacSer   domain.RBACService
 	healthSer domain.HealthService
 	validator *services.CustomValidator
 }
@@ -37,18 +38,22 @@ func NewServer() *http.Server {
 	authSer := services.NewAuthService(userRepo, jwtSer)
 	healthRepo := repositories.NewHealthRepository(sqlDB)
 	healthSer := services.NewHealthService(healthRepo)
+	rbacCacheRepo := repositories.NewInMemoryRBACRepository()
+	rbacRepo := repositories.NewRBACRepository(dbConnection)
+	rbacSer := services.NewRBACService(rbacCacheRepo, rbacRepo)
 
-	NewServer := &Server{
+	srv := &Server{
 		port:      port,
 		authSer:   authSer,
 		jwtSer:    jwtSer,
+		rbacSer:   rbacSer,
 		healthSer: healthSer,
 		validator: customValidator,
 	}
 
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", NewServer.port),
-		Handler:      NewServer.RegisterRoutes(),
+		Addr:         fmt.Sprintf(":%d", srv.port),
+		Handler:      srv.RegisterRoutes(),
 		IdleTimeout:  time.Minute,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
